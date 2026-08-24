@@ -46,6 +46,7 @@ def _get_platform_default_hermes_home() -> Path:
     """Return the platform-native default Hermes home path."""
     if sys.platform == "win32":
         local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        local_appdata = _normalize_msys_env_path(local_appdata)
         base = Path(local_appdata) if local_appdata else Path.home() / "AppData" / "Local"
         return base / "hermes"
     return Path.home() / ".hermes"
@@ -68,6 +69,36 @@ def sudo_invoker_default_home() -> Path | None:
         return Path(pwd.getpwnam(sudo_user).pw_dir) / ".hermes"
     except KeyError:  # SUDO_USER not in passwd (chroot/container)
         return None
+
+
+def _normalize_msys_env_path(value: str, *, platform: str | None = None) -> str:
+    """Convert an MSYS/POSIX-form Windows path to native Windows form.
+
+    Under git-bash/MSYS, Win32 env vars are rewritten to POSIX form when
+    spawning native Python -- ``HERMES_HOME`` arrives as ``/c/Users/<user>/...``
+    instead of ``C:/Users/<user>/...``. A bare ``Path(value)`` then mangles the
+    leading ``/c`` into a rooted relative path (``\\c\\Users\\...``) pointing at
+    a non-existent shadow tree, breaking board enumeration and allowing junk
+    ``C:\\c\\...`` dirs to be created.
+
+    This normalizes only the narrow, intentional MSYS form on win32:
+    ``/<ASCII drive letter>/...`` -> ``<UPPER DRIVE>:/...``. Every other value
+    -- native drive paths (slash or backslash), UNC paths, custom root-relative
+    paths, Unicode non-drive paths, and all non-Windows values -- passes through
+    unchanged. A bare ``/c`` (no trailing slash) is also left unchanged.
+    ``platform`` defaults to ``sys.platform`` and exists so the rule can be
+    tested as data on any host rather than by patching the interpreter's OS.
+    """
+    if (
+        (platform if platform is not None else sys.platform) == "win32"
+        and len(value) >= 3
+        and value[0] == "/"
+        and value[1].isascii()
+        and value[1].isalpha()
+        and value[2] == "/"
+    ):
+        return f"{value[1].upper()}:/{value[3:]}"
+    return value
 
 
 def _warn_profile_fallback_once() -> None:
@@ -154,7 +185,7 @@ def get_process_hermes_home() -> Path:
     request is scoped to another profile (e.g. embedded ``/chat`` under ``--open-profile``).
     """
     val = os.environ.get("HERMES_HOME", "").strip()
-    return Path(val) if val else _get_platform_default_hermes_home()
+    return Path(_normalize_msys_env_path(val)) if val else _get_platform_default_hermes_home()
 
 
 # Hermes-managed runtime downloads at the root of a home (GGUF models, llama.cpp runtimes,
@@ -178,7 +209,7 @@ def get_default_hermes_root() -> Path:
         return memo[2]
     result = native_home
     if env_home:
-        env_path = Path(env_home)
+        env_path = Path(_normalize_msys_env_path(env_home))
         try:
             env_path.resolve().relative_to(native_home.resolve())  # under ~/.hermes (normal or profile mode)
         except ValueError:  # Docker/custom root: <root>/profiles/<name> -> <root>, else HERMES_HOME itself
