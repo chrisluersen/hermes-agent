@@ -279,7 +279,11 @@ _MODEL_CONFIG_ROW_MISSING = object()
 _BARE_BILLING_PROVIDERS = frozenset({"auto", "custom"})
 
 
-def _cwd_prefix_clause(cwd_prefix: str) -> Tuple[str, List[str]]:
+def _cwd_prefix_clause(
+    cwd_prefix: str, *, column: str = "s.cwd"
+) -> Tuple[str, List[str]]:
+    if column not in {"cwd", "s.cwd"}:
+        raise ValueError("unsupported cwd column expression")
     prefix = cwd_prefix.rstrip("/\\") or cwd_prefix
     # ``_`` and ``%`` are LIKE wildcards but ordinary characters in a path
     # (``my_project``), so an unescaped prefix also matches sibling directories.
@@ -288,7 +292,8 @@ def _cwd_prefix_clause(cwd_prefix: str) -> Tuple[str, List[str]]:
     # ``=`` arm is an exact compare and keeps the raw prefix.
     esc = _escape_like(prefix)
     return (
-        "(s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\' OR s.cwd LIKE ? ESCAPE '\\')",
+        f"({column} = ? OR {column} LIKE ? ESCAPE '\\' "
+        f"OR {column} LIKE ? ESCAPE '\\')",
         [prefix, f"{esc}/%", f"{esc}\\\\%"],
     )
 
@@ -10585,6 +10590,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 turn_lease_holder=turn_lease_holder,
                 turn_lease_ttl_seconds=turn_lease_ttl_seconds,
             )
+            if role == "user":
+                self._reopen_session_for_activity(conn, session_id)
             cursor = conn.execute(
                 """INSERT INTO messages (session_id, role, content, tool_call_id,
                    tool_calls, tool_name, effect_disposition, timestamp, token_count, finish_reason,
@@ -10700,6 +10707,8 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                 turn_lease_holder=turn_lease_holder,
                 turn_lease_ttl_seconds=turn_lease_ttl_seconds,
             )
+            if any(message.get("role") == "user" for message in messages):
+                self._reopen_session_for_activity(conn, session_id)
             inserted, tool_calls_total = self._insert_message_rows(
                 conn, session_id, messages
             )
@@ -10720,6 +10729,59 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         # Same criticality as append_message: this IS the turn's transcript.
         return self._execute_write(
             _do, patience_s=self._TRANSCRIPT_WRITE_PATIENCE_S
+        )
+
+    def _reopen_session_for_activity(self, conn, session_id: str) -> None:
+        """Reopen a closed session inside the caller's append transaction.
+
+        Any newly persisted activity reopens the conversation. An explicit
+        ``[closed]`` prefix is removed, terminal lifecycle fields are cleared,
+        and a deterministic suffix avoids rejecting the activity when another
+        session already owns the unprefixed title.
+        """
+        row = conn.execute(
+            "SELECT title, ended_at, end_reason FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            return
+
+        title = row["title"]
+        from hermes_cli.session_listing import strip_display_status_prefixes
+
+        base, explicitly_closed = strip_display_status_prefixes(title or "")
+        if not explicitly_closed and row["ended_at"] is None and row["end_reason"] is None:
+            return
+
+        reopened_title = title
+        if explicitly_closed:
+            base = base or "Untitled session"
+            conflict = conn.execute(
+                "SELECT 1 FROM sessions WHERE title = ? AND id != ? LIMIT 1",
+                (base, session_id),
+            ).fetchone()
+            if conflict is None:
+                reopened_title = base
+            else:
+                short_id = re.sub(r"[^A-Za-z0-9_-]", "", session_id)[-6:] or "session"
+                counter = 1
+                while True:
+                    ordinal = "" if counter == 1 else f"-{counter}"
+                    suffix = f" (reopened {short_id}{ordinal})"
+                    prefix = base[:self.MAX_TITLE_LENGTH - len(suffix)].rstrip()
+                    candidate = f"{prefix}{suffix}"
+                    collision = conn.execute(
+                        "SELECT 1 FROM sessions WHERE title = ? AND id != ? LIMIT 1",
+                        (candidate, session_id),
+                    ).fetchone()
+                    if collision is None:
+                        reopened_title = candidate
+                        break
+                    counter += 1
+
+        conn.execute(
+            "UPDATE sessions SET title = ?, ended_at = NULL, end_reason = NULL WHERE id = ?",
+            (reopened_title, session_id),
         )
 
     def set_latest_matching_message_display_kind(
@@ -13758,11 +13820,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         if self.get_meta(gate) == "1":
             return 0
 
+        cwd_clause, cwd_params = _cwd_prefix_clause(prefix, column="cwd")
+
         def _do(conn):
             cursor = conn.execute(
                 "UPDATE sessions SET source = 'kanban' "
-                "WHERE source = 'cli' AND (cwd = ? OR cwd LIKE ? ESCAPE '\\')",
-                (prefix, _escape_like(prefix) + "/%"),
+                f"WHERE source = 'cli' AND {cwd_clause}",
+                cwd_params,
             )
             # Read rowcount before set_meta reuses this cursor for its INSERT,
             # which would otherwise overwrite it with the meta write's count.

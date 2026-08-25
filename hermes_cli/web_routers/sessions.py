@@ -23,6 +23,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 
 from hermes_cli.web_deps import late
+from hermes_cli.session_listing import (
+    AUTOMATED_SESSION_SOURCES,
+    prepare_session_rows,
+)
 from hermes_cli.web_models import (
     BulkDeleteSessions,
     SessionImport,
@@ -112,6 +116,8 @@ def get_sessions(
             # section (source=cron) into two independent lists.
             source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
             exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+            if source is None and not source_list:
+                exclude_list = sorted(set(exclude_list) | AUTOMATED_SESSION_SOURCES)
             sessions = db.list_sessions_rich(
                 source=source or None,
                 sources=source_list or None,
@@ -154,6 +160,7 @@ def get_sessions(
                 # SQLite stores the flag as 0/1; expose a real JSON boolean.
                 s["archived"] = bool(s.get("archived"))
                 s["pinned"] = bool(s.get("pinned"))
+            sessions = prepare_session_rows(sessions)
             if not full:
                 _strip_session_list_rows(sessions)
             return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
@@ -195,6 +202,8 @@ async def search_sessions(
             source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
             include_sources = [source_filter] if source_filter else (source_list or None)
             exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+            if include_sources is None:
+                exclude_list = sorted(set(exclude_list) | AUTOMATED_SESSION_SOURCES)
             now = time.time()
 
             # Walk parent_session_id to the compression root, memoized so a
@@ -382,7 +391,7 @@ async def search_sessions(
                         "session_started": m.get("session_started"),
                     },
                 )
-            return {"results": list(seen.values())}
+            return {"results": prepare_session_rows(list(seen.values()))}
         finally:
             db.close()
     except HTTPException:

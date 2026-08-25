@@ -29,6 +29,10 @@ from typing import Any, Dict, List, Optional, Tuple  # noqa: F401
 
 from fastapi import APIRouter, HTTPException, Query  # noqa: F401
 
+from hermes_cli.session_listing import (
+    AUTOMATED_SESSION_SOURCES,
+    prepare_session_rows,
+)
 from hermes_cli.web_deps import late
 from hermes_cli.web_models import (
     ProfileCreate,
@@ -278,6 +282,8 @@ def get_profiles_sessions(
     source_filter = source or None
     source_list = [s.strip() for s in (sources or "").split(",") if s.strip()]
     exclude_list = [s.strip() for s in (exclude_sources or "").split(",") if s.strip()]
+    if source_filter is None and not source_list:
+        exclude_list = sorted(set(exclude_list) | AUTOMATED_SESSION_SOURCES)
     # Over-fetch per profile so the merged+sorted window is correct for the
     # requested page. Capped so a huge profile can't blow up the response.
     per_profile = min(max(limit + offset, limit), 500)
@@ -355,6 +361,7 @@ def get_profiles_sessions(
     if len(merged) > offset + limit:
         seen = {id(s) for s in window}
         window.extend(s for s in merged[offset + limit:] if s.get("pinned") and id(s) not in seen)
+    window = prepare_session_rows(window)
     if not full:
         _strip_session_list_rows(window)
     return {
@@ -412,8 +419,14 @@ def get_profiles_sessions_sidebar(
         targets.append(("default", profiles_mod.get_profile_dir("default")))
 
     recents_scope = (recents_profile or "all").strip() or "all"
-    recents_exclude_list = [s for s in (recents_exclude or "").split(",") if s.strip()]
-    messaging_exclude_list = [s for s in (messaging_exclude or "").split(",") if s.strip()]
+    recents_exclude_list = [s.strip() for s in (recents_exclude or "").split(",") if s.strip()]
+    recents_exclude_list = sorted(
+        set(recents_exclude_list) | AUTOMATED_SESSION_SOURCES
+    )
+    messaging_exclude_list = [s.strip() for s in (messaging_exclude or "").split(",") if s.strip()]
+    messaging_exclude_list = sorted(
+        set(messaging_exclude_list) | AUTOMATED_SESSION_SOURCES
+    )
 
     recents_cap = min(max(recents_limit, 1), 500)
     cron_cap = min(max(cron_limit, 1), 500)
@@ -528,6 +541,7 @@ def get_profiles_sessions_sidebar(
         if len(rows) > cap:
             seen = {id(s) for s in win}
             win.extend(s for s in rows[cap:] if s.get("pinned") and id(s) not in seen)
+        win = prepare_session_rows(win)
         _strip_session_list_rows(win)
         return win
 

@@ -322,9 +322,14 @@ def cmd_sessions(args, sessions_parser=None):
         print(f"Error: Could not open session database: {e}")
         return 1
 
-    # Hide third-party tool sessions by default, but honour explicit --source
+    # Hide system-generated sessions by default, but honour explicit --source.
+    # They remain available through an explicit source filter.
     _source = getattr(args, "source", None)
-    _exclude = None if _source else ["tool"]
+    from hermes_cli.session_listing import (
+        AUTOMATED_SESSION_SOURCES,
+        prepare_session_rows,
+    )
+    _exclude = None if _source else sorted(AUTOMATED_SESSION_SOURCES)
 
     if action == "list":
         from hermes_state import workspace_key as _ws_key
@@ -332,6 +337,7 @@ def cmd_sessions(args, sessions_parser=None):
         sessions = db.list_sessions_rich(
             source=args.source, exclude_sources=_exclude, limit=args.limit
         )
+        sessions = prepare_session_rows(sessions)
 
         # Workspace filter: match a session by its workspace key (git repo
         # root, else cwd) — path substring or exact basename.
@@ -1117,7 +1123,7 @@ def cmd_sessions(args, sessions_parser=None):
         rows = db.list_sessions_rich(
             limit=1, include_pinned=True, exclude_sources=_exclude
         )
-        pinned_rows = [s for s in rows if s.get("pinned")]
+        pinned_rows = prepare_session_rows([s for s in rows if s.get("pinned")])
         if getattr(args, "json", False):
             payload = [
                 {
@@ -1208,10 +1214,11 @@ def cmd_sessions(args, sessions_parser=None):
     elif action == "browse":
         limit = getattr(args, "limit", 500) or 500
         source = getattr(args, "source", None)
-        _browse_exclude = None if source else ["tool"]
+        _browse_exclude = None if source else sorted(AUTOMATED_SESSION_SOURCES)
         sessions = db.list_sessions_rich(
             source=source, exclude_sources=_browse_exclude, limit=limit
         )
+        sessions = prepare_session_rows(sessions)
         if not sessions:
             db.close()
             print("No sessions found.")

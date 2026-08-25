@@ -503,6 +503,62 @@ class TestSessionManagementEndpoints:
         db.create_session(session_id="sess-x", source="cli")
         db.close()
 
+    def test_default_list_hides_automated_sessions_and_explicit_source_restores_them(self):
+        from hermes_state import SessionDB
+
+        db = SessionDB()
+        db.set_session_title("sess-x", "Human session")
+        db.create_session(session_id="sess-cron", source="cron")
+        db.set_session_title("sess-cron", "Nightly job")
+        db.end_session("sess-cron", "completed")
+        db.create_session(session_id="sess-kanban", source="kanban")
+        db.set_session_title("sess-kanban", "Board worker")
+        db.create_session(session_id="sess-tool", source="tool")
+        db.set_session_title("sess-tool", "Tool worker")
+        db.close()
+
+        default_response = self.client.get("/api/sessions")
+        assert default_response.status_code == 200
+        default_body = default_response.json()
+        assert default_body["total"] == 1
+        assert [row["id"] for row in default_body["sessions"]] == ["sess-x"]
+        assert default_body["sessions"][0]["title"] == "[open] Human session"
+
+        cron_response = self.client.get("/api/sessions", params={"source": "cron"})
+        assert cron_response.status_code == 200
+        cron_body = cron_response.json()
+        assert cron_body["total"] == 1
+        assert [row["id"] for row in cron_body["sessions"]] == ["sess-cron"]
+        assert cron_body["sessions"][0]["title"] == "[automated] [closed] Nightly job"
+
+        unified_default = self.client.get(
+            "/api/profiles/sessions", params={"profile": "default"}
+        )
+        assert unified_default.status_code == 200
+        unified_body = unified_default.json()
+        assert unified_body["total"] == 1
+        assert unified_body["profile_totals"] == {"default": 1}
+        assert [row["id"] for row in unified_body["sessions"]] == ["sess-x"]
+        assert unified_body["sessions"][0]["title"] == "[open] Human session"
+
+        unified_automated = self.client.get(
+            "/api/profiles/sessions",
+            params={"profile": "default", "sources": "cron,kanban,tool"},
+        )
+        assert unified_automated.status_code == 200
+        automated_body = unified_automated.json()
+        assert automated_body["total"] == 3
+        assert automated_body["profile_totals"] == {"default": 3}
+        assert {row["id"] for row in automated_body["sessions"]} == {
+            "sess-cron",
+            "sess-kanban",
+            "sess-tool",
+        }
+        assert all(
+            row["title"].startswith("[automated]")
+            for row in automated_body["sessions"]
+        )
+
 
     def test_stats_source_counts_use_direct_aggregate(self, monkeypatch):
         """Source badges must not materialise rich session rows.

@@ -114,6 +114,9 @@ def test_desktop_session_search_merges_id_matches_before_content_matches(monkeyp
 
     assert _FakeSessionDB.requested_fields is not None
     assert "context" not in _FakeSessionDB.requested_fields
+    assert all(result["title"] == "[open] Untitled session" for result in response["results"])
+    for result in response["results"]:
+        result.pop("title")
     # ID match surfaces first; the content hit on the SAME session is deduped
     # by lineage root (not double-listed); the unrelated content hit follows.
     assert response == {

@@ -102,7 +102,7 @@ def test_pinned_lists_only_pinned_rows(monkeypatch, capsys):
     # include_pinned back-fill is what guarantees old pins surface
     assert db.list_kwargs["include_pinned"] is True
     assert "pinned_one" in out
-    assert "Keep Me" in out
+    assert "[open] Keep Me" in out
     assert "recent_unpinned" not in out
 
 
@@ -123,7 +123,7 @@ def test_pinned_json_output(monkeypatch, capsys):
     assert payload == [
         {
             "id": "pinned_one",
-            "title": "Keep Me",
+            "title": "[open] Keep Me",
             "source": "cli",
             "last_active": 1_700_000_000.0,
             "message_count": 3,

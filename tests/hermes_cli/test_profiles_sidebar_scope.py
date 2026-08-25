@@ -97,6 +97,28 @@ def _slice_ids(payload, slice_name):
 
 class TestSidebarScope:
 
+    def test_automated_sources_stay_out_of_default_human_slices(self, client, profiles_on_disk):
+        home = profiles_on_disk["default"]
+        _seed_session(home, "human-chat", source="cli")
+        _seed_session(home, "human-message", source="telegram")
+        _seed_session(home, "auto-cron", source="cron")
+        _seed_session(home, "auto-kanban", source="kanban")
+        _seed_session(home, "auto-tool", source="tool")
+
+        payload = client.get(
+            "/api/profiles/sessions/sidebar",
+            params={"recents_profile": "default", "messaging_exclude": "cli"},
+        ).json()
+
+        assert payload["errors"] == []
+        assert _slice_ids(payload, "recents") == {"human-chat", "human-message"}
+        assert _slice_ids(payload, "messaging") == {"human-message"}
+        assert _slice_ids(payload, "cron") == {"auto-cron"}
+        assert all(
+            row["title"].startswith("[automated]")
+            for row in payload["cron"]["sessions"]
+        )
+
     def test_concrete_profile_sees_only_its_own_slices(self, client, profiles_on_disk):
         _seed_session(profiles_on_disk["default"], "default-chat", source="cli")
         _seed_session(profiles_on_disk["default"], "default-cron", source="cron")

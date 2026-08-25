@@ -119,3 +119,15 @@ def test_retag_gate_is_per_board(db, tmp_path):
 
     assert db.retag_kanban_worker_sessions(str(board_a)) == 1
     assert db.retag_kanban_worker_sessions(str(board_b)) == 1
+
+
+def test_retag_matches_descendants_with_either_path_separator(db):
+    root = "C:/Hermes/kanban/workspaces"
+    db.create_session(session_id="slash", source="cli", cwd=root + "/t_slash")
+    db.create_session(session_id="backslash", source="cli", cwd=root + "\\t_backslash")
+    db.create_session(session_id="outside", source="cli", cwd="C:/Hermes/kanban/other/t_no")
+
+    assert db.retag_kanban_worker_sessions(root) == 2
+
+    sources = {row[0]: row[1] for row in db._conn.execute("SELECT id, source FROM sessions")}
+    assert sources == {"slash": "kanban", "backslash": "kanban", "outside": "cli"}
