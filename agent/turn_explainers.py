@@ -9,7 +9,8 @@ from contextlib import suppress
 from typing import Any, Dict, Optional
 
 from agent.tool_dispatch_helpers import (
-    _extract_error_preview, _extract_file_mutation_targets, _extract_landed_file_mutation_paths
+    _extract_error_preview, _extract_file_mutation_targets, _extract_landed_file_mutation_paths,
+    _extract_reported_landed_paths, _paths_equal_reconciled,
 )
 from agent.tool_result_classification import (
     FILE_MUTATING_TOOL_NAMES as _FILE_MUTATING_TOOLS, file_mutation_result_landed
@@ -201,8 +202,20 @@ class TurnExplainersMixin:
         if not targets:
             return
         landed = file_mutation_result_landed(tool_name, result)
-        if landed:
-            landed_paths = _extract_landed_file_mutation_paths(tool_name, args, result)
+        # Explicitly-reported landed subset (files_modified/created/deleted +
+        # resolved_path), empty for a complete no-write failure. Distinct from
+        # ``landed_paths`` below so an error-shaped partial patch can still
+        # reconcile the files it actually changed.
+        reported_landed = _extract_reported_landed_paths(result)
+        if landed or reported_landed:
+            # Track landed/changed paths and feed the checkpoint ledger whether
+            # the call is a clean success OR a partial patch failure that
+            # explicitly reported some files as landed.
+            landed_paths = (
+                _extract_landed_file_mutation_paths(tool_name, args, result)
+                if landed
+                else reported_landed
+            )
             changed = getattr(self, "_turn_file_mutation_paths", None)
             if changed is not None:
                 changed.update(landed_paths)
@@ -216,7 +229,23 @@ class TurnExplainersMixin:
         if is_error and not landed:
             # Keep the FIRST error per path unless a later success replaces it.
             preview = _extract_error_preview(result)
+            # A later partial retry may report a target as landed under a
+            # different spelling (relative vs absolute) than the key recorded by
+            # an earlier attempt — clear any equivalent prior failure key.
+            if reported_landed:
+                for existing in list(state.keys()):
+                    if any(_paths_equal_reconciled(existing, lp) for lp in reported_landed):
+                        state.pop(existing, None)
             for path in targets:
+                # A landed (reported or reconciled) target is not a failure —
+                # it changed on disk. Only unresolved requested targets stay
+                # in the failure state.
+                if any(_paths_equal_reconciled(path, lp) for lp in reported_landed):
+                    state.pop(path, None)
+                    continue
+                # Keep the FIRST error we saw for a given path unless we
+                # later see success.  A repeated failure with a different
+                # message shouldn't silently overwrite the original.
                 state.setdefault(path, {"tool": tool_name, "error_preview": preview})
         else:
             for path in targets:
