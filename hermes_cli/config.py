@@ -1422,6 +1422,12 @@ def _warn_invalid_platform_toolsets(results: Dict[str, Any], quiet: bool) -> Non
         from hermes_cli.toolset_validation import validate_platform_toolsets
         from hermes_cli.toolset_scope import toolset_allowed_for_platform
 
+        # Plugin toolsets (e.g. platform-adapters and user plugins) only enter the registry when
+        # plugins are discovered; validating first would flag legitimately-enabled plugin toolsets
+        # as unknown. discover_plugins() is idempotent.
+        from hermes_cli.plugins import discover_plugins
+
+        discover_plugins()
         for w in validate_platform_toolsets(
                 read_raw_config().get("platform_toolsets"), validate_toolset, toolset_allowed_for_platform):
             results["warnings"].append(w)
