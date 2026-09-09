@@ -713,4 +713,34 @@ class TestRootLevelProviderOverride:
         assert result["model"]["provider"] == "auto"
 
 
+class TestInitToolsetsUnknownToolsetWarning:
+    """The unknown-toolset warning runs at CLI construction, before plugin
+    discovery registers plugin toolsets (agent init). A config-declared plugin
+    toolset must not be flagged (mirrors the MCP-name exclusion); a genuinely
+    unknown name must still warn. Regression for the a2a/buzz/eikon false warning."""
+
+    @staticmethod
+    def _cli_with_warning_sink(monkeypatch, plugin_keys):
+        cli_obj = _make_cli()
+        printed = []
+        cli_obj._console_print = printed.append
+        monkeypatch.setattr(
+            "hermes_cli.plugins.get_plugin_toolset_keys_nowait",
+            lambda: set(plugin_keys),
+        )
+        return cli_obj, printed
+
+    def test_plugin_toolset_not_warned(self, monkeypatch):
+        cli_obj, printed = self._cli_with_warning_sink(
+            monkeypatch, ["a2a", "buzz", "eikon"])
+        cli_obj._init_toolsets(["a2a", "buzz", "eikon", "terminal"])
+        assert printed == []
+
+    def test_unknown_toolset_still_warned(self, monkeypatch):
+        cli_obj, printed = self._cli_with_warning_sink(monkeypatch, ["a2a"])
+        cli_obj._init_toolsets(["a2a", "bogus_toolset"])
+        assert len(printed) == 1
+        assert "bogus_toolset" in printed[0]
+
+
 
