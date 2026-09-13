@@ -13,15 +13,29 @@ import * as jsxRuntime from 'react/jsx-runtime'
 
 import * as sdk from './index'
 
-const GLOBALS = {
-  __HERMES_PLUGIN_SDK__: sdk,
-  __HERMES_REACT__: React,
-  __HERMES_REACT_JSX__: jsxRuntime,
-  __HERMES_REACT_JSX_DEV__: jsxDevRuntime
-} as const
+// Resolved LAZILY, never as a module-scope literal. This module sits in an
+// import cycle — `sdk/index` → `contrib/*` → `contrib/runtime-loader` →
+// `sdk/runtime` — so a module-scope `{ __HERMES_PLUGIN_SDK__: sdk, … }` is
+// evaluated BEFORE `sdk/index`'s own body runs. In the bundled app that read
+// yields `undefined` (the bundler emits the namespace as a hoisted `var`), so
+// `Object.keys(GLOBALS.__HERMES_PLUGIN_SDK__)` threw
+// "Cannot convert undefined or null to object" and EVERY runtime (disk)
+// plugin failed to load. Reading them at call time — installPluginSdk() and
+// the shim builder only ever run once the app is up — gets the live
+// namespaces.
+function pluginNamespaces() {
+  return {
+    __HERMES_PLUGIN_SDK__: sdk,
+    __HERMES_REACT__: React,
+    __HERMES_REACT_JSX__: jsxRuntime,
+    __HERMES_REACT_JSX_DEV__: jsxDevRuntime
+  }
+}
+
+type PluginGlobalKey = keyof ReturnType<typeof pluginNamespaces>
 
 export function installPluginSdk(): void {
-  Object.assign(globalThis, GLOBALS)
+  Object.assign(globalThis, pluginNamespaces())
 }
 
 /** Build a shim ESM blob that re-exports a global namespace's live members.
@@ -40,16 +54,16 @@ const RESERVED_WORDS = new Set([
   'implements','package','protected','interface','private','public'
 ])
 
-function shimUrl(globalKey: keyof typeof GLOBALS): string {
+function shimUrl(globalKey: PluginGlobalKey): string {
   // The shim's own local binding must not collide with an export name: a
   // minified SDK chunk can export ANY valid identifier, including the local
-  // name the shim uses for the namespace (`const m = ...; export const { m }
-  // = m;` is `Identifier 'm' has already been declared` — proven: the
-  // session-list-density chunk exports `m`). Use an unlikely internal name
-  // AND exclude it from the destructure list so a future collision stays
-  // impossible.
+  // name the shim uses for the namespace (`const LOCAL = ...; export const {
+  // LOCAL } = LOCAL;` is `Identifier 'LOCAL' has already been declared` —
+  // proven: the session-list-density chunk exports `m`, the local name this
+  // once used). Use an unlikely internal name AND exclude it from the
+  // destructure list so a future collision stays impossible.
   const LOCAL = '__hermes_shim_ns__'
-  const names = Object.keys(GLOBALS[globalKey]).filter(
+  const names = Object.keys(pluginNamespaces()[globalKey]).filter(
     name =>
       name !== 'default' &&
       name !== LOCAL &&
