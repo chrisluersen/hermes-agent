@@ -56,7 +56,7 @@ def _pin_to(monkeypatch, board=None):
 def _running_on_other_board(slug: str, *, assignee: str = "alice", count: int = 1):
     """``count`` claimed (status='running') tasks on the additional board ``slug``."""
     kb.create_board(slug)
-    with kbc.connect(board=slug) as conn:
+    with kbc.connect_closing(board=slug) as conn:
         for i in range(count):
             tid = kb.create_task(conn, title=f"busy-{i}", assignee=assignee)
             assert kb.claim_task(conn, tid) is not None
@@ -109,7 +109,7 @@ def test_pinned_env_excludes_only_the_processs_own_board(
     the tick (``count_running_tasks(conn)``), so the other-board walk must skip
     A and only A.
     """
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="busy-here", assignee="alice")
         assert kb.claim_task(conn, tid) is not None
     _running_on_other_board("second", count=1)
@@ -134,7 +134,7 @@ def test_pinned_env_host_cap_counts_other_boards(
     _pin_to(monkeypatch)
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kb.create_task(conn, title="wants-to-run", assignee="alice")
         res = kbd.dispatch_once(
             conn, spawn_fn=_fake_spawn_factory(spawns), max_in_progress=2,
@@ -153,7 +153,7 @@ def test_pinned_env_per_profile_cap_counts_other_boards(
     _pin_to(monkeypatch)
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kb.create_task(conn, title="wants-to-run", assignee="alice")
         res = kbd.dispatch_once(
             conn, spawn_fn=_fake_spawn_factory(spawns),
