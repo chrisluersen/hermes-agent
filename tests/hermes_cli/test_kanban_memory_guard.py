@@ -133,7 +133,7 @@ def test_dispatch_spawns_nothing_under_critical_pressure(
         spawns.append(task.id)
         return 42
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("a", "b", "c"):
             kb.create_task(conn, title=title, assignee="alice")
         res = kbd.dispatch_once(conn, spawn_fn=fake_spawn)
@@ -155,7 +155,7 @@ def test_dispatch_critical_pressure_defers_not_drops(
         spawns.append(task.id)
         return 42
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task = kb.create_task(conn, title="a", assignee="alice")
         kbd.dispatch_once(conn, spawn_fn=fake_spawn)
         assert not spawns
@@ -181,7 +181,7 @@ def test_dispatch_elevated_pressure_spawns_at_most_one(
         spawns.append(task.id)
         return 42
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("a", "b", "c"):
             kb.create_task(conn, title=title, assignee="alice")
         res = kbd.dispatch_once(conn, spawn_fn=fake_spawn)
@@ -203,7 +203,7 @@ def test_dispatch_elevated_pressure_does_not_widen_tighter_budget(
         spawns.append(task.id)
         return 42
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         running = kb.create_task(conn, title="running", assignee="alice")
         kb.claim_task(conn, running)
         kb.create_task(conn, title="ready", assignee="bob")
@@ -223,7 +223,7 @@ def test_dispatch_unknown_pressure_imposes_no_restriction(
         spawns.append(task.id)
         return 42
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("a", "b", "c"):
             kb.create_task(conn, title=title, assignee="alice")
         res = kbd.dispatch_once(conn, spawn_fn=fake_spawn)
@@ -239,7 +239,7 @@ def test_dispatch_critical_pressure_still_runs_reclaim_bookkeeping(
     monkeypatch.setattr(
         kbd, "_system_memory_sample", lambda: _pressure_sample("critical")
     )
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent = kb.create_task(conn, title="parent", assignee="alice")
         child = kb.create_task(
             conn, title="child", assignee="alice", parents=[parent],
