@@ -33,7 +33,7 @@ def kanban_home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def conn(kanban_home):
-    with kbc.connect() as c:
+    with kbc.connect_closing() as c:
         yield c
 
 
@@ -101,7 +101,7 @@ def _promote_ns(task_id, *, ids=None, reason=None, force=False,
 
 
 def test_cli_promote_bulk_ids_promotes_all(kanban_home, capsys):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent = kb.create_task(conn, title="parent")
         children = [
             kb.create_task(conn, title=f"c{i}", parents=[parent])
@@ -113,7 +113,7 @@ def test_cli_promote_bulk_ids_promotes_all(kanban_home, capsys):
     out = capsys.readouterr().out
     for c in children:
         assert c in out
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for c in children:
             assert kb.get_task(conn, c).status == "ready"
 
