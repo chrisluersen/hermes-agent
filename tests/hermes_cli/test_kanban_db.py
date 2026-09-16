@@ -143,7 +143,7 @@ def test_connect_migrates_legacy_db_before_optional_column_indexes(tmp_path):
     conn.commit()
     conn.close()
 
-    with kbc.connect(db_path) as migrated:
+    with kbc.connect_closing(db_path) as migrated:
         task_columns = {
             row["name"] for row in migrated.execute("PRAGMA table_info(tasks)")
         }
@@ -193,7 +193,7 @@ def test_connect_migrates_legacy_db_before_optional_column_indexes(tmp_path):
 
 
 def test_schedule_task_parks_time_delay_without_dispatching(kanban_home):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="delayed recheck", assignee="ops")
         assert kb.schedule_task(conn, t, reason="run next week") is True
         task = kb.get_task(conn, t)
@@ -220,7 +220,7 @@ def test_stale_claim_reclaim_event_records_diagnostic_payload(
     import json
     import hermes_cli.kanban_db as _kb
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="x", assignee="a")
         host = _kb._claimer_id().split(":", 1)[0]
         kb.claim_task(conn, t, claimer=f"{host}:worker")
@@ -280,7 +280,7 @@ def test_rate_limit_exit_requeues_without_counting_failure(
     monkeypatch.setattr(_kb, "_pid_alive", lambda _pid: False)
     monkeypatch.setenv("HERMES_KANBAN_CRASH_GRACE_SECONDS", "0")
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         host = _kb._claimer_id().split(":", 1)[0]
         tid = kb.create_task(conn, title="rl", assignee="a")
 
@@ -344,7 +344,7 @@ def test_respawn_guard_defers_rate_limited_within_cooldown(
     monkeypatch.setenv("HERMES_KANBAN_RATE_LIMIT_COOLDOWN_SECONDS", "300")
     now = 5_000_000
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="rl-guard", assignee="a")
         # Seed a rate_limited run that just ended + the stamped error.
         kb.claim_task(conn, tid)
@@ -398,7 +398,7 @@ def test_recompute_ready_honours_dispatcher_failure_limit(kanban_home):
     breaker — sticking a task prematurely (config limit > default) or
     letting a tripped task escape (config limit < default).
     """
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         # Config allows MORE retries than the default. A task blocked
         # with failures below the configured limit must still recover.
         t = kb.create_task(conn, title="lenient", assignee="a")
@@ -455,7 +455,7 @@ def test_recompute_ready_honours_dispatcher_failure_limit(kanban_home):
 
 
 def test_delete_archived_task_removes_related_rows(kanban_home):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent = kb.create_task(conn, title="parent")
         tid = kb.create_task(conn, title="child", parents=[parent], assignee="worker")
         kb.add_comment(conn, tid, "user", "cleanup me")
@@ -479,7 +479,7 @@ def test_delete_archived_task_removes_related_rows(kanban_home):
 
 
 def test_delete_task_removes_task_and_cascades(kanban_home):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="to-delete", assignee="alice")
         kb.add_comment(conn, t, "user", "comment")
         kb.add_comment(conn, t, "user", "another")
@@ -538,7 +538,7 @@ def test_worktree_workspace_explicit_target_materializes_linked_worktree(kanban_
     _init_git_repo(repo)
     target = repo / ".worktrees" / "custom-task"
     branch = "wt/custom-task"
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(
             conn,
             title="ship",
@@ -583,7 +583,7 @@ def test_worktree_workspace_explicit_target_materializes_linked_worktree(kanban_
 
 def test_complete_task_persists_scratch_artifacts_before_cleanup(kanban_home):
     """Completion artifacts from scratch workspaces survive workspace cleanup."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="render chart")
         task = kb.get_task(conn, t)
         ws = kbw.resolve_workspace(task)
@@ -610,7 +610,7 @@ def test_complete_task_persists_scratch_artifacts_before_cleanup(kanban_home):
     assert str(persisted) != str(artifact)
     assert run is not None
     assert run.metadata["artifacts"] == [str(persisted)]
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         attachments = kb.list_attachments(conn, t)
     assert [(a.filename, a.stored_path) for a in attachments] == [
         ("chart.png", str(persisted.resolve()))
@@ -620,7 +620,7 @@ def test_complete_task_persists_scratch_artifacts_before_cleanup(kanban_home):
 def test_review_bound_handoff_preserves_declared_artifacts(kanban_home):
     """A review-bound card's declared files must outlive the reviewer's
     completion — that completion is what cleans the scratch workspace up."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="review bound")
         task = kb.get_task(conn, t)
         ws = kbw.resolve_workspace(task)
@@ -656,7 +656,7 @@ def test_complete_task_registers_artifact_already_in_attachments_dir(kanban_home
     file was on disk with zero ``task_attachments`` rows and ``kanban_attachments``
     returned ``[]``. Contract: registration follows the declaration, not the copy.
     """
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="pre-placed deliverable")
         ws = kbw.resolve_workspace(kb.get_task(conn, t))
         kbw.set_workspace_path(conn, t, ws)
@@ -679,7 +679,7 @@ def test_review_rollback_keeps_pre_placed_artifact(kanban_home):
     """A file the worker placed in the attachments dir is not a staged copy, so a
     rolled-back handoff must leave it alone — only copies this call made are
     discardable."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="pre-placed rollback")
         ws = kbw.resolve_workspace(kb.get_task(conn, t))
         kbw.set_workspace_path(conn, t, ws)
@@ -707,7 +707,7 @@ def test_review_rollback_keeps_pre_placed_artifact(kanban_home):
 def test_request_review_rollback_discards_staged_copies(kanban_home):
     """A failure after staging rolls the txn back; the copied file must go
     too, or the retry stages ``evidence_1.json`` next to an orphan."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="review rollback")
         ws = kbw.resolve_workspace(kb.get_task(conn, t))
         kbw.set_workspace_path(conn, t, ws)
@@ -748,7 +748,7 @@ def test_dir_child_completion_unblocks_deferred_scratch_parent(kanban_home, tmp_
     """
     child_dir = tmp_path / "persistent-child"
     child_dir.mkdir()
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent = kb.create_task(conn, title="scratch parent")
         child = kb.create_task(
             conn, title="dir child", workspace_kind="dir",
@@ -900,12 +900,12 @@ class TestSharedBoardPaths:
         # Dispatcher creates the board and a task.
         self._set_home(monkeypatch, tmp_path, default_home)
         kb.init_db()
-        with kbc.connect() as conn:
+        with kbc.connect_closing() as conn:
             task_id = kb.create_task(conn, title="cross-profile")
 
         # Worker switches to the profile HERMES_HOME and reads.
         monkeypatch.setenv("HERMES_HOME", str(profile_home))
-        with kbc.connect() as conn:
+        with kbc.connect_closing() as conn:
             task = kb.get_task(conn, task_id)
         assert task is not None
         assert task.title == "cross-profile"
@@ -1168,7 +1168,7 @@ def test_unlink_tasks_triggers_recompute_ready(kanban_home):
     Before the fix, child stayed 'todo' indefinitely after unlink; only the
     next dispatcher tick or a manual 'hermes kanban recompute' would promote it.
     """
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         # A is done.
         a = kb.create_task(conn, title="parent-done")
         kb.complete_task(conn, a)
@@ -1411,7 +1411,7 @@ def test_dispatch_max_in_progress_blocks_review_when_at_limit(
         spawns.append(task.id)
         return 42
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         running = kb.create_task(conn, title="running", assignee="alice")
         kb.claim_task(conn, running)
         review = kb.create_task(conn, title="review", assignee="bob")
@@ -1536,7 +1536,7 @@ def test_locked_healthy_db_does_not_classify_as_corrupt(tmp_path, monkeypatch):
 
     # And once the lock clears, normal access still works.
     monkeypatch.setattr(kb.sqlite3, "connect", real_connect)
-    with kbc.connect(db_path=db_path) as conn:
+    with kbc.connect_closing(db_path=db_path) as conn:
         kb.create_task(conn, title="still here")
         titles = [t.title for t in kb.list_tasks(conn)]
     assert "still here" in titles
@@ -1556,7 +1556,7 @@ def test_maybe_emit_scratch_tip_fires_once_per_install(kanban_home, caplog):
     """
     import logging
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t1 = kb.create_task(conn, title="first scratch")
         t2 = kb.create_task(conn, title="second scratch")
 
@@ -1564,7 +1564,7 @@ def test_maybe_emit_scratch_tip_fires_once_per_install(kanban_home, caplog):
     assert not kbw._scratch_tip_shown()
 
     with caplog.at_level(logging.WARNING, logger="hermes_cli.kanban_db"):
-        with kbc.connect() as conn:
+        with kbc.connect_closing() as conn:
             kbw._maybe_emit_scratch_tip(conn, t1, "scratch")
 
     # Sentinel is now set.
@@ -1582,7 +1582,7 @@ def test_maybe_emit_scratch_tip_fires_once_per_install(kanban_home, caplog):
     )
 
     # An event row was appended on the first task.
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         events = conn.execute(
             "SELECT kind FROM task_events WHERE task_id = ? ORDER BY id",
             (t1,),
@@ -1596,7 +1596,7 @@ def test_maybe_emit_scratch_tip_fires_once_per_install(kanban_home, caplog):
     # Second scratch materialization on the same install stays silent.
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="hermes_cli.kanban_db"):
-        with kbc.connect() as conn:
+        with kbc.connect_closing() as conn:
             kbw._maybe_emit_scratch_tip(conn, t2, "scratch")
     tip_records2 = [
         r for r in caplog.records
@@ -1606,7 +1606,7 @@ def test_maybe_emit_scratch_tip_fires_once_per_install(kanban_home, caplog):
         f"Tip should not re-fire after sentinel is set; got "
         f"{[r.getMessage() for r in tip_records2]!r}"
     )
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         events2 = conn.execute(
             "SELECT kind FROM task_events WHERE task_id = ? ORDER BY id",
             (t2,),
@@ -1627,7 +1627,7 @@ def test_connect_sets_secure_delete_on(tmp_path):
     """secure_delete=ON must be active on every new connection."""
     db_path = tmp_path / "kanban.db"
     kb._INITIALIZED_PATHS.discard(str(db_path.resolve()))
-    with kbc.connect(db_path=db_path) as conn:
+    with kbc.connect_closing(db_path=db_path) as conn:
         row = conn.execute("PRAGMA secure_delete").fetchone()
     assert row[0] == 1, f"expected secure_delete=1, got {row[0]}"
 
@@ -1677,7 +1677,7 @@ def test_write_txn_preserves_original_exception_when_rollback_fails(kanban_home)
         def __getattr__(self, name):
             return getattr(self._real, name)
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         wrapper = FailingConnWrapper(conn)
         with pytest.raises(sqlite3.OperationalError) as excinfo:
             with kb.write_txn(wrapper):
@@ -1779,7 +1779,7 @@ def test_archive_running_task_terminates_worker(kanban_home, monkeypatch):
     auditable via the ``archive_worker_termination`` event."""
     import json
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="x", assignee="a")
         host = kb._claimer_id().split(":", 1)[0]
         kb.claim_task(conn, t, claimer=f"{host}:worker")
@@ -1810,7 +1810,7 @@ def test_archive_non_running_task_does_not_attempt_termination(kanban_home):
     """A never-claimed (``triage``/``ready``/``done``) task has no live worker:
     ``archive_task`` must not signal anything, and no termination event is
     recorded — only for tasks that were actually ``running`` at archive time."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         t = kb.create_task(conn, title="x", assignee="a")
         signalled = []
         assert kb.archive_task(
