@@ -178,7 +178,7 @@ def test_dashboard_and_db_paths_produce_identical_outcomes(tmp_path, monkeypatch
     client = TestClient(app)
 
     def build_graph(tag: str):
-        with kbc.connect() as c:
+        with kbc.connect_closing() as c:
             parent = kb.create_task(c, title=f"{tag}-parent", assignee="planner")
             assert kb.complete_task(c, parent)
             child = kb.create_task(
@@ -197,7 +197,7 @@ def test_dashboard_and_db_paths_produce_identical_outcomes(tmp_path, monkeypatch
     assert r.status_code == 200, r.text
 
     # Surface 2: DB function directly (the single domain implementation).
-    with kbc.connect() as c:
+    with kbc.connect_closing() as c:
         with kb.write_txn(c):
             c.execute(
                 "UPDATE tasks SET status = 'todo', completed_at = NULL "
@@ -208,7 +208,7 @@ def test_dashboard_and_db_paths_produce_identical_outcomes(tmp_path, monkeypatch
             c, db_parent, author="dashboard",
         )
 
-    with kbc.connect() as c:
+    with kbc.connect_closing() as c:
         def snapshot(tid: str):
             t = kb.get_task(c, tid)
             assert t is not None
