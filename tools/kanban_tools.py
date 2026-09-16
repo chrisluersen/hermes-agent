@@ -895,7 +895,13 @@ def _handle_create(args: dict, **kw) -> str:
             initial_status=str(args.get("initial_status") or "running"),
             created_by=os.environ.get("HERMES_PROFILE") or "worker", session_id=session_id)
         landed = _fields(kb.get_task(conn, new_tid), _CREATED_FIELDS)
-        return _ok(task_id=new_tid, **landed, subscribed=_maybe_auto_subscribe(conn, new_tid))
+        # Creation is the cheapest place to catch an assignee no worker can be
+        # spawned for — the card would otherwise look healthy in 'ready' forever.
+        from hermes_cli.kanban_db_dispatch import assignee_advisory
+
+        advisory = assignee_advisory(str(assignee), task_id=new_tid)
+        return _ok(task_id=new_tid, **landed, subscribed=_maybe_auto_subscribe(conn, new_tid),
+                   **({"warning": advisory} if advisory else {}))
 
 
 def _resolve_notify_target() -> Optional[dict[str, Any]]:
