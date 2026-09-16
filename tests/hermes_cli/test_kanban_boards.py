@@ -153,21 +153,40 @@ class TestBoardCRUD:
         # (connect() does mkdir(exist_ok=True)). If _INITIALIZED_PATHS still
         # contains the resolved path, the CREATE TABLE pass is skipped and
         # downstream readers hit `no such table: task_events`.
+        #
+        # Every connection here goes through connect_closing(): sqlite3's own
+        # `with conn` commits/rolls back but never closes the fd, and on Windows
+        # a live handle on kanban.db makes the board-directory rename fail with
+        # `PermissionError: [WinError 5]` (POSIX permits renaming a directory
+        # holding an open file, which is why this only ever failed here). The
+        # board dir must be free of every handle this process owns before
+        # remove_board() touches the filesystem.
         kb.create_board("recycle")
         # First connect populates _INITIALIZED_PATHS for this DB.
-        with kbc.connect(board="recycle") as conn:
+        with kbc.connect_closing(board="recycle") as conn:
             kb.create_task(conn, title="t1", assignee="dev")
         db_path = kb.board_dir("recycle") / "kanban.db"
+        board_path = kb.board_dir("recycle")
         assert str(db_path.resolve()) in kb._INITIALIZED_PATHS
+        assert board_path.is_dir()
 
         kb.remove_board("recycle", archive=archive)
+        # The archive must have actually happened on the filesystem — not merely
+        # returned a dict — or a PermissionError that something swallowed would
+        # leave an orphaned board directory behind while callers believe it moved.
+        assert not board_path.exists()
+        if archive:
+            archived = list((kb.boards_root() / "_archived").glob("recycle-*"))
+            assert len(archived) == 1, archived
+            assert archived[0].joinpath("kanban.db").exists()
+        assert "recycle" not in {b["slug"] for b in kb.list_boards(include_archived=False)}
         # remove_board must drop the cache entry so a re-create through
         # connect() gets a fresh schema-init pass.
         assert str(db_path.resolve()) not in kb._INITIALIZED_PATHS
 
         # Simulate the event-stream poll: re-open the same slug. connect()
         # recreates the directory + empty .db; the schema must be re-applied.
-        with kbc.connect(board="recycle") as conn:
+        with kbc.connect_closing(board="recycle") as conn:
             tables = {
                 row[0]
                 for row in conn.execute(
@@ -194,18 +213,18 @@ class TestConnectionIsolation:
         kb.create_board("alpha")
         kb.create_board("beta")
 
-        with kbc.connect(board="alpha") as conn:
+        with kbc.connect_closing(board="alpha") as conn:
             kb.create_task(conn, title="alpha-task-1", assignee="dev")
             kb.create_task(conn, title="alpha-task-2", assignee="dev")
 
-        with kbc.connect(board="beta") as conn:
+        with kbc.connect_closing(board="beta") as conn:
             kb.create_task(conn, title="beta-only", assignee="dev")
 
-        with kbc.connect(board="alpha") as conn:
+        with kbc.connect_closing(board="alpha") as conn:
             a = kb.list_tasks(conn)
-        with kbc.connect(board="beta") as conn:
+        with kbc.connect_closing(board="beta") as conn:
             b = kb.list_tasks(conn)
-        with kbc.connect(board="default") as conn:
+        with kbc.connect_closing(board="default") as conn:
             d = kb.list_tasks(conn)
 
         assert {t.title for t in a} == {"alpha-task-1", "alpha-task-2"}
@@ -215,9 +234,9 @@ class TestConnectionIsolation:
     def test_connect_without_args_uses_current(self, fresh_home):
         kb.create_board("curr")
         kb.set_current_board("curr")
-        with kbc.connect() as conn:
+        with kbc.connect_closing() as conn:
             kb.create_task(conn, title="implicit", assignee="x")
-        with kbc.connect(board="curr") as conn:
+        with kbc.connect_closing(board="curr") as conn:
             tasks = kb.list_tasks(conn)
         assert [t.title for t in tasks] == ["implicit"]
 
@@ -226,11 +245,11 @@ class TestConnectionIsolation:
         kb.create_board("envwin")
         kb.set_current_board("persist")
         monkeypatch.setenv("HERMES_KANBAN_BOARD", "envwin")
-        with kbc.connect() as conn:
+        with kbc.connect_closing() as conn:
             kb.create_task(conn, title="via-env", assignee="x")
-        with kbc.connect(board="envwin") as conn:
+        with kbc.connect_closing(board="envwin") as conn:
             assert [t.title for t in kb.list_tasks(conn)] == ["via-env"]
-        with kbc.connect(board="persist") as conn:
+        with kbc.connect_closing(board="persist") as conn:
             assert kb.list_tasks(conn) == []
 
 
