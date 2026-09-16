@@ -22,10 +22,9 @@ def _build_board_db(db_path: Path, tasks: int = 12) -> None:
     """Create a real board DB with data so indexes have entries."""
     kb._INITIALIZED_PATHS.discard(str(db_path.resolve()))
     kb.init_db(db_path=db_path)
-    with kbc.connect(db_path=db_path) as conn:
+    with kbc.connect_closing(db_path=db_path) as conn:
         for i in range(tasks):
             kb.create_task(conn, title=f"task-{i}")
-    conn.close()
     # Force the next connect() to re-run the health guard.
     kb._INITIALIZED_PATHS.discard(str(db_path.resolve()))
 
