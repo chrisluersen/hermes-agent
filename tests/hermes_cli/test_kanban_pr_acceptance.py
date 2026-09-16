@@ -77,7 +77,7 @@ def github(tmp_path, monkeypatch):
 
 @pytest.mark.linux_only
 def test_pr_completion_requires_current_required_evidence(github):
-    with connect() as conn:
+    with connect_closing() as conn:
         for conclusion in ("failure", "pending", "cancelled", "timed_out", "action_required", "neutral", "skipped", None, "success"):
             github.update(conclusion=conclusion, head="a" * 40)
             tid = kb.create_task(conn, title="Publish", completion_contract="acme/repo")
@@ -111,13 +111,13 @@ def test_pr_completion_requires_current_required_evidence(github):
 
 @pytest.mark.linux_only
 def test_acceptance_receipts_and_terminal_write_share_run_ownership(github):
-    with connect() as conn:
+    with connect_closing() as conn:
         for conclusion in ("success", "failure"):
             tid = kb.create_task(conn, title="race", completion_contract="acme/repo")
             owner = kb.claim_task(conn, tid)
             run_id = owner.current_run_id
             def reclaim():
-                with connect() as rival:
+                with connect_closing() as rival:
                     assert kb.block_task(rival, tid, reason="Reassigned during acceptance")
                     assert kb.unblock_task(rival, tid)
                     github["replacement"] = kb.claim_task(rival, tid).current_run_id
