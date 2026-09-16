@@ -173,7 +173,7 @@ def test_request_review_rejects_unknown_reviewer_without_mutation(monkeypatch, w
     from tools import kanban_tools as kt
 
     (tmp_path / ".hermes" / "profiles" / "verifier").mkdir(parents=True)
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         before = kb.get_task(conn, worker_env)
         before_events = kb.list_events(conn, worker_env)
     monkeypatch.setenv("HERMES_KANBAN_RUN_ID", str(before.current_run_id))
@@ -181,7 +181,7 @@ def test_request_review_rejects_unknown_reviewer_without_mutation(monkeypatch, w
     out = json.loads(kt._handle_request_review({"summary": "Ready for review.", "reviewer": "reviewer"}))
 
     assert "'reviewer'" in out["error"] and "verifier" in out["error"]
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         after = kb.get_task(conn, worker_env)
         assert (after.status, after.assignee, after.current_run_id) == ("running", "test-worker", before.current_run_id)
         assert kb.list_events(conn, worker_env) == before_events
@@ -193,13 +193,13 @@ def test_request_review_accepts_installed_profile(monkeypatch, worker_env, tmp_p
     from tools import kanban_tools as kt
 
     (tmp_path / ".hermes" / "profiles" / "verifier").mkdir(parents=True)
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         monkeypatch.setenv("HERMES_KANBAN_RUN_ID", str(kb.get_task(conn, worker_env).current_run_id))
 
     out = json.loads(kt._handle_request_review({"summary": "Ready for review.", "reviewer": "verifier"}))
 
     assert out["ok"] is True
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task = kb.get_task(conn, worker_env)
         assert (task.status, task.assignee) == ("review", "verifier")
 
