@@ -41,7 +41,7 @@ def kanban_home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def conn(kanban_home):
-    with kbc.connect() as c:
+    with kbc.connect_closing() as c:
         yield c
 
 
