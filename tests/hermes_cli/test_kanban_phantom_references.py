@@ -54,13 +54,13 @@ def test_cross_board_citation_is_not_a_phantom_reference(kanban_home, monkeypatc
     default_db = str(kb.kanban_db_path())
 
     kb.create_board("other")
-    with kbc.connect(board="other") as conn:
+    with kbc.connect_closing(board="other") as conn:
         other_id = kb.create_task(conn, title="sibling writer", assignee="alice")
 
     if pinned:
         monkeypatch.setenv("HERMES_KANBAN_DB", default_db)
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="reporter", assignee="alice")
         assert kb.complete_task(
             conn, tid,
@@ -70,7 +70,7 @@ def test_cross_board_citation_is_not_a_phantom_reference(kanban_home, monkeypatc
             ),
         )
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kinds = _event_kinds(conn, tid)
 
     assert "completed" in kinds
@@ -79,11 +79,11 @@ def test_cross_board_citation_is_not_a_phantom_reference(kanban_home, monkeypatc
 
 def test_unresolvable_reference_is_still_flagged(kanban_home):
     """Widening the lookup must not turn the scan into a no-op."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="reporter", assignee="alice")
         assert kb.complete_task(conn, tid, summary="Blocked on t_deadbeef1234.")
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kinds = _event_kinds(conn, tid)
 
     assert "suspected_hallucinated_references" in kinds
@@ -92,10 +92,10 @@ def test_unresolvable_reference_is_still_flagged(kanban_home):
 def test_created_cards_gate_stays_board_local(kanban_home):
     """``created_cards`` claims authorship, so another board's id does not verify."""
     kb.create_board("other")
-    with kbc.connect(board="other") as conn:
+    with kbc.connect_closing(board="other") as conn:
         other_id = kb.create_task(conn, title="not created by this worker", assignee="alice")
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="reporter", assignee="alice")
         with pytest.raises(kb.HallucinatedCardsError):
             kb.complete_task(conn, tid, summary="done", created_cards=[other_id])
