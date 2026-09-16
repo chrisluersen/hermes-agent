@@ -46,7 +46,7 @@ def test_kanban_list_json_includes_session_id(kanban_home):
     dashboards) don't need a side query to filter by chat session."""
     from hermes_cli import kanban_db as kb
     from hermes_cli import kanban_db_connect as kbc
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kb.create_task(
             conn, title="acp task", assignee="alice", session_id="acp-x"
         )
