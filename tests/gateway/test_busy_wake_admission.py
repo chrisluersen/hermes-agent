@@ -45,7 +45,7 @@ async def unused_handler(event):
 async def test_completed_board_wake_is_admitted_without_changing_human_input(tmp_path, monkeypatch, human_pending):
     monkeypatch.setenv("HERMES_KANBAN_DB", str(tmp_path / "board.db"))
     kb.init_db()
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="wake receipt", assignee="worker")
         kb.complete_task(conn, tid, summary="completed result")
         task = kb.get_task(conn, tid)
