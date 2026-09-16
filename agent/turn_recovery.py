@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from agent.conversation_compression import COMPRESSION_RETRY_CONTEXT_REDUCED_STATUS_TEMPLATE
+from agent.fallback_trail import attach_fallback_trail, format_fallback_trail
 from agent.model_metadata import is_output_cap_error, parse_available_output_tokens_from_error
 from agent.retry_utils import is_zai_coding_overload_error, zai_coding_overload_retry_ceiling
 from agent.error_classifier import FailoverReason
@@ -746,16 +747,16 @@ def nonretryable_client_error_result(
             f"Provider message: {_nonretryable_summary}\n\n"
             f"{_CONTENT_POLICY_RECOVERY_HINT}"
         )
-        return _content_policy_blocked_result(
+        return attach_fallback_trail(_content_policy_blocked_result(
             messages, api_call_count, final_response=_policy_response, error_detail=_nonretryable_summary,
-        )
+        ), agent)
     # Billing walls get the same structured recovery descriptor as the max-retries path
     # so every surface renders one consistent signal.
     if classified.reason == FailoverReason.billing:
-        return _billing_failure_result(
+        return attach_fallback_trail(_billing_failure_result(
             classified=classified, summary=_nonretryable_summary, messages=messages,
             api_call_count=api_call_count, provider=provider, base_url=base_url, model=model,
-        )
+        ), agent)
     _final_response = _nonretryable_summary
     if _welcome_hint:
         _final_response += f"\n\n{_welcome_tier_guidance(classified, model=model, in_chat=True)}"
@@ -767,7 +768,7 @@ def nonretryable_client_error_result(
         "failure_reason": classified.reason.value,
         "failure_retryable": bool(classified.retryable),
     })
-    return result
+    return attach_fallback_trail(result, agent)
 
 
 _STREAM_DROP_MARKERS = (
@@ -816,6 +817,9 @@ def max_retries_exhausted_result(
     else:
         agent._emit_status(f"❌ API failed after {max_retries} retries — {_final_summary}")
     _vlines(agent, f"   💀 Final error: {_final_summary}")
+    # Name the whole walk, not just the backend it ended on (see agent.fallback_trail).
+    for _trail_line in format_fallback_trail(agent).splitlines():
+        _vlines(agent, f"   {_trail_line}")
     _welcome_hint = _welcome_tier_guidance(classified, model=model, in_chat=False)
     if _welcome_hint:
         _vlines(agent, f"   💡 {_welcome_hint}")
@@ -900,7 +904,7 @@ def max_retries_exhausted_result(
         # Present only for billing walls: (provider, billing_url, is_nous, message).
         "billing_block": _billing_block,
     })
-    return result
+    return attach_fallback_trail(result, agent)
 
 
 def log_api_error_attempt(
