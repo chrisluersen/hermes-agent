@@ -46,7 +46,7 @@ def setup_runner(tmp_path, monkeypatch):
 
 
 def completion(*, profile="yuki", metadata=None, chat="post", thread="post", mode="notify+wake"):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task = kb.create_task(conn, title="route completion", assignee="worker")
         kbn.add_notify_sub(conn, task_id=task, platform="discord", chat_id=chat,
                            thread_id=thread, chat_type="thread", user_id="creator",
@@ -67,7 +67,7 @@ async def deliver(runner, rows):
 
 
 def unseen(task):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         return kbn.unseen_events_for_sub(conn, task_id=task, platform="discord", chat_id="post",
                                          thread_id="post", kinds=["completed"])[1]
 
