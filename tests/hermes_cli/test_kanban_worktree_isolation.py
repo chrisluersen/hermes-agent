@@ -70,7 +70,7 @@ def _add_worktree(repo: Path, target: Path, branch: str) -> Path:
 
 
 def test_decompose_worktree_children_get_own_workspace(kanban_home):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         root = kb.create_task(conn, title="build the feature", triage=True)
         conn.execute(
             "UPDATE tasks SET workspace_kind='worktree', "
@@ -108,7 +108,7 @@ def test_resolve_worktree_falls_back_when_path_occupied(kanban_home, tmp_path):
     repo = _make_repo(tmp_path)
     occupied = _add_worktree(repo, repo / ".worktrees" / "sibling", "wt/sibling")
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(
             conn,
             title="second sibling",
