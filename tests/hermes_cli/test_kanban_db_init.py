@@ -81,7 +81,7 @@ def test_legacy_text_pk_tables_rebuilt_to_integer_autoincrement(tmp_path, monkey
     db_path = _setup_home(tmp_path, monkeypatch)
     _make_legacy_db(db_path)
 
-    with kbc.connect(db_path) as conn:
+    with kbc.connect_closing(db_path) as conn:
         for table in ("task_events", "task_comments", "task_runs"):
             id_col = {r["name"]: r for r in conn.execute(f"PRAGMA table_info({table})")}["id"]
             assert id_col["type"].upper() == "INTEGER" and id_col["pk"] == 1
@@ -116,10 +116,10 @@ def test_migration_is_idempotent(tmp_path, monkeypatch):
     db_path = _setup_home(tmp_path, monkeypatch)
     _make_legacy_db(db_path)
 
-    with kbc.connect(db_path):
+    with kbc.connect_closing(db_path):
         pass
     kb._INITIALIZED_PATHS.discard(str(db_path.resolve()))
-    with kbc.connect(db_path) as conn:
+    with kbc.connect_closing(db_path) as conn:
         id_col = {r["name"]: r for r in conn.execute("PRAGMA table_info(task_events)")}["id"]
         assert id_col["type"].upper() == "INTEGER"
         assert len(conn.execute("SELECT * FROM task_events").fetchall()) == 2
@@ -131,7 +131,7 @@ def test_unseen_events_for_sub_survives_migrated_db(tmp_path, monkeypatch):
     db_path = _setup_home(tmp_path, monkeypatch)
     _make_legacy_db(db_path)
 
-    with kbc.connect(db_path) as conn:
+    with kbc.connect_closing(db_path) as conn:
         cursor, events = kbn.unseen_events_for_sub(
             conn, task_id="task-1", platform="telegram", chat_id="123"
         )
