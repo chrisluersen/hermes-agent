@@ -56,7 +56,7 @@ def test_mention_style_assignee_is_stored_as_the_profile_name(kanban_home):
     """``@default`` is the display spelling; storing it verbatim makes the card
     unspawnable. It must land as ``default``, and the dispatcher must then see a
     real profile rather than a non-spawnable lane."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="mention-style assignee", assignee="@ Default ")
         stored = kb.get_task(conn, tid).assignee
         res = kbd.dispatch_once(conn, dry_run=True)
@@ -71,7 +71,7 @@ def test_unresolvable_assignee_is_reported_at_creation(kanban_home):
     that resolves to no local profile is still a legal write (an external worker
     lane pulls its own tasks), so the guard is an explicit advisory the creator
     can act on while it is still in the loop."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="ghost assignee", assignee="ghost-profile")
         assert kb.get_task(conn, tid).assignee == "ghost-profile"
         advisory = kbd.assignee_advisory("ghost-profile", task_id=tid)
@@ -84,7 +84,7 @@ def test_unresolvable_assignee_is_reported_at_creation(kanban_home):
 
 def test_unresolvable_assignee_is_recorded_and_reported_once(kanban_home):
     """A pre-guard row must not be silent, and must not spam an event per tick."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="legacy bad row")
         conn.execute("UPDATE tasks SET assignee = ? WHERE id = ?", ("ghost-profile", tid))
         conn.commit()
