@@ -66,7 +66,7 @@ def test_real_profile_names_are_still_normalized_not_dropped(raw, kanban_home):
 
 def test_create_stores_null_for_assignee_none(kanban_home):
     """The write path: ``create`` and ``assign`` must agree on NULL."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         created = kb.create_task(
             conn, title="none assignee", assignee="none",
         )
@@ -99,7 +99,7 @@ def test_null_assignee_ready_row_is_adopted_by_default_assignee(kanban_home):
         spawned.append(task.id)
         return None
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(
             conn, title="none assignee dispatch", assignee="none",
         )
