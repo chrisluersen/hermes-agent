@@ -243,7 +243,7 @@ def test_patch_review_lifecycle_preserves_handoff_and_reopens(client):
     )
     assert response.status_code == 200, response.text
     assert response.json()["task"]["status"] == "review"
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         run = kb.latest_run(conn, task["id"])
         assert run is not None
         assert run.outcome == "review_requested"
@@ -267,7 +267,7 @@ def test_patch_review_lifecycle_preserves_handoff_and_reopens(client):
     assert response.status_code == 200, response.text
     assert response.json()["task"]["status"] == "ready"
     assert response.json()["task"]["assignee"] == "builder"
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         assert any(
             event.kind == "review_reopened"
             for event in kb.list_events(conn, task["id"])
@@ -312,7 +312,7 @@ def test_reopening_parent_demotes_ready_child(client):
 
 
 def test_reopening_parent_retracts_review_and_blocks_approval(client):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent_id = kb.create_task(conn, title="parent", assignee="planner")
         assert kb.complete_task(conn, parent_id)
         child_id = kb.create_task(
@@ -344,7 +344,7 @@ def test_reopening_parent_retracts_review_and_blocks_approval(client):
     )
     assert response.status_code == 200, response.text
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         child = kb.get_task(conn, child_id)
         assert child is not None
         assert child.status == "todo"
@@ -363,7 +363,7 @@ def test_reopening_parent_retracts_review_and_blocks_approval(client):
     )
     assert response.status_code == 200, response.text
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         child = kb.get_task(conn, child_id)
         assert child is not None
         assert child.status == "review"
@@ -381,7 +381,7 @@ def test_reopening_parent_retracts_review_and_blocks_approval(client):
 
 
 def test_reopening_parent_recursively_retracts_done_and_running_descendants(client):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent_id = kb.create_task(conn, title="root", assignee="planner")
         assert kb.complete_task(conn, parent_id)
         child_id = kb.create_task(
@@ -406,7 +406,7 @@ def test_reopening_parent_recursively_retracts_done_and_running_descendants(clie
     )
     assert response.status_code == 200, response.text
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         child = kb.get_task(conn, child_id)
         grandchild = kb.get_task(conn, grandchild_id)
         assert child is not None and child.status == "todo"
@@ -422,7 +422,7 @@ def test_reopening_parent_recursively_retracts_done_and_running_descendants(clie
         json={"status": "done"},
     )
     assert response.status_code == 200, response.text
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         child = kb.get_task(conn, child_id)
         grandchild = kb.get_task(conn, grandchild_id)
         assert child is not None and child.status == "ready"
@@ -430,7 +430,7 @@ def test_reopening_parent_recursively_retracts_done_and_running_descendants(clie
 
 
 def test_dashboard_reclaim_of_active_review_preserves_review_phase(client):
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task_id = kb.create_task(conn, title="active review", assignee="reviewer")
         implementation = kb.claim_task(conn, task_id)
         assert implementation is not None
@@ -450,7 +450,7 @@ def test_dashboard_reclaim_of_active_review_preserves_review_phase(client):
     assert response.status_code == 200, response.text
     assert response.json()["task"]["status"] == "review"
     assert response.json()["task"]["assignee"] == "reviewer"
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         run = kb.latest_run(conn, task_id)
         assert run is not None
         assert run.outcome == "reclaimed"
@@ -641,7 +641,7 @@ def test_bulk_review_assignment_preserves_implementer_provenance(client):
     )
     assert response.status_code == 200, response.text
     assert all(item["ok"] for item in response.json()["results"])
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for task in tasks:
             current = kb.get_task(conn, task["id"])
             assert current is not None
