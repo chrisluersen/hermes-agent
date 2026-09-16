@@ -138,13 +138,13 @@ def test_max_in_progress_counts_other_boards(
     kb.create_board("second")
 
     # Two workers already running on the second board.
-    with kbc.connect(board="second") as conn:
+    with kbc.connect_closing(board="second") as conn:
         for title in ("busy-1", "busy-2"):
             tid = kb.create_task(conn, title=title, assignee="alice")
             assert kb.claim_task(conn, tid) is not None
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kb.create_task(conn, title="wants-to-run", assignee="alice")
         res = kbd.dispatch_once(
             conn, spawn_fn=_fake_spawn_factory(spawns), max_in_progress=2,
@@ -160,12 +160,12 @@ def test_max_in_progress_partial_budget_across_boards(
 ):
     kb.create_board("second")
 
-    with kbc.connect(board="second") as conn:
+    with kbc.connect_closing(board="second") as conn:
         tid = kb.create_task(conn, title="busy", assignee="alice")
         assert kb.claim_task(conn, tid) is not None
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("a", "b", "c"):
             kb.create_task(conn, title=title, assignee="alice")
         res = kbd.dispatch_once(
@@ -191,12 +191,12 @@ def test_count_running_tasks_other_boards_fails_open(
 def test_max_spawn_stays_per_board(kanban_home, all_assignees_spawnable):
     """``max_spawn`` keeps its historical per-board semantics."""
     kb.create_board("second")
-    with kbc.connect(board="second") as conn:
+    with kbc.connect_closing(board="second") as conn:
         tid = kb.create_task(conn, title="busy", assignee="alice")
         assert kb.claim_task(conn, tid) is not None
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kb.create_task(conn, title="a", assignee="alice")
         res = kbd.dispatch_once(
             conn, spawn_fn=_fake_spawn_factory(spawns), max_spawn=1,
@@ -228,7 +228,7 @@ def test_review_lane_gets_reserved_slot_under_ready_backlog(
     )
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("ready-1", "ready-2", "ready-3"):
             kb.create_task(conn, title=title, assignee="alice")
         review_id = _park_in_review(conn, "review-me", "reviewer")
@@ -252,7 +252,7 @@ def test_review_reservation_released_when_no_review_work(
     )
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("ready-1", "ready-2", "ready-3"):
             kb.create_task(conn, title=title, assignee="alice")
         res = kbd.dispatch_once(
@@ -280,7 +280,7 @@ def test_nonspawnable_review_does_not_tax_ready_budget(
     )
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         for title in ("ready-1", "ready-2"):
             kb.create_task(conn, title=title, assignee="alice")
         _park_in_review(conn, "human-review", "some-human")
@@ -303,7 +303,7 @@ def test_review_budget_still_bounded_by_shared_cap(
     )
 
     spawns: list = []
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         kb.create_task(conn, title="ready-1", assignee="alice")
         for i in range(3):
             _park_in_review(conn, f"review-{i}", "reviewer")
