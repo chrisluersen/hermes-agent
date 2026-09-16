@@ -59,7 +59,7 @@ def test_worker_block_is_not_auto_promoted_by_recompute_ready(kanban_home: Path)
     must stay blocked across an arbitrary number of dispatcher ticks.
     Before #28712's fix, ``recompute_ready`` would silently flip it
     back to ``ready`` on the very next tick."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="needs human review")
         kb.claim_task(conn, tid)
         assert kb.block_task(
@@ -116,7 +116,7 @@ def test_protocol_violation_loop_is_broken(kanban_home: Path) -> None:
     that *would* have been written and asserts the *next* tick still
     leaves the task blocked.
     """
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         tid = kb.create_task(conn, title="loop reproducer")
         kb.claim_task(conn, tid)
         kb.block_task(
@@ -158,7 +158,7 @@ def test_protocol_violation_loop_is_broken(kanban_home: Path) -> None:
 
 def test_created_with_initial_status_blocked_is_not_promoted_by_recompute_ready(kanban_home: Path) -> None:
     """Verify a task created with initial_status='blocked' remains blocked when parents complete."""
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         parent_id = kb.create_task(conn, title="parent task")
         child_id = kb.create_task(
             conn, title="gated child task", parents=[parent_id], initial_status="blocked"
