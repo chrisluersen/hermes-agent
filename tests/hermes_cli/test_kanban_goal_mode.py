@@ -80,7 +80,7 @@ def test_legacy_db_migrates_goal_columns(tmp_path, monkeypatch):
 
     # init_db runs the additive migration.
     kb.init_db()
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(tasks)")}
         assert "goal_mode" in cols
         assert "goal_max_turns" in cols
