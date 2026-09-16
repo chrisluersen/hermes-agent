@@ -1040,13 +1040,25 @@ def _record_task_failure(
         if not (force_trip or failures >= effective_limit):
             if release_claim:
                 # Spawn path: restore the claimed source phase + clear claim.
-                conn.execute(
+                cur = conn.execute(
                     "UPDATE tasks SET status = ?, claim_lock = NULL, "
                     "claim_expires = NULL, worker_pid = NULL, "
                     "consecutive_failures = ?, last_failure_error = ? "
                     "WHERE id = ? AND status = 'running'",
                     (retry_status, failures, error, task_id),
                 )
+                if cur.rowcount != 1:
+                    # The task left ``running`` before this write: it reached a
+                    # terminal success (the iteration-budget path races
+                    # ``kanban_complete``, which the caller cannot see), was
+                    # blocked, or was reclaimed. The counter/claim UPDATE above
+                    # is already a no-op, so make the whole record one — a
+                    # ``timed_out``/``crashed`` event appended here is what the
+                    # notifier renders as "timed out; dispatcher will retry",
+                    # stamping a false retry onto a card that finished and will
+                    # never be retried. ``enforce_max_runtime`` guards its twin
+                    # path the same way (``cur.rowcount == 1``).
+                    return False
             else:
                 conn.execute(
                     "UPDATE tasks SET consecutive_failures = ?, "
@@ -1586,9 +1598,10 @@ def count_running_tasks_other_boards_by_assignee(
     pool, which no single board owns: seeded board-locally, N active boards
     each running N workers read as "under cap" and multiply the fan-out the
     cap exists to prevent. Boards are enumerated by their OWN DB path
-    (:func:`_own_board_db_path`), not through the pin-aware resolver — under a
-    worker's ``HERMES_KANBAN_DB`` pin every slug resolves to that worker's own
-    file and the walk returns ``{}``. Fails open per board.
+    (:func:`_own_board_db_path`), not through the pin-aware resolver: the
+    pin-aware resolver collapses every slug onto the worker's own file, so the
+    walk would return ``{}``. Resolving each board's own path keeps every board
+    distinct whether or not a pin is set. Fails open per board.
     """
     try:
         others = _other_board_db_paths(board)
