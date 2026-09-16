@@ -616,7 +616,7 @@ async def test_notifier_wakes_origin_for_review_and_keeps_subscription(kanban_ho
     from gateway.config import Platform
     from gateway.run import GatewayRunner
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task_id = kb.create_task(conn, title="review handoff", assignee="builder")
         kbn.add_notify_sub(
             conn,
@@ -665,7 +665,7 @@ async def test_notifier_wakes_origin_for_review_and_keeps_subscription(kanban_ho
 
     assert any("ready for review" in message for message in delivered)
     assert any("Implementation and tests ready" in message for message in delivered)
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         assert kbn.list_notify_subs(conn), "review is non-final; subscription must survive"
 
 
@@ -988,7 +988,7 @@ async def test_notifier_uploads_review_handoff_artifacts(kanban_home, tmp_path, 
 def test_migration_backfills_legacy_gateway_subs_to_notify_wake(kanban_home):
     from hermes_cli.kanban_db_connect import _migrate_add_optional_columns
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task_id = kb.create_task(conn, title="legacy sub upgrade")
         # Simulate a pre-delivery_mode database: drop the column entirely,
         # then insert legacy-shaped rows (one gateway, one tui).
@@ -1025,7 +1025,7 @@ def test_migration_backfills_legacy_gateway_subs_to_notify_wake(kanban_home):
 def test_migration_backfill_runs_only_on_first_add(kanban_home):
     from hermes_cli.kanban_db_connect import _migrate_add_optional_columns
 
-    with kbc.connect() as conn:
+    with kbc.connect_closing() as conn:
         task_id = kb.create_task(conn, title="explicit downgrade survives")
         kbn.add_notify_sub(
             conn,
