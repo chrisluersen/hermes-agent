@@ -788,6 +788,27 @@ def find_profile_gateway_processes(exclude_pids: set | None = None, *, strict: b
     return processes
 
 
+_WINDOWS_SHARED_SERVICE_HOST_IMAGE = "svchost.exe"
+
+
+def _windows_service_host_is_shared_host(psutil_module, pid: int) -> bool:
+    """True when ``pid``'s image is a generic Windows shared service host (``svchost.exe``).
+
+    ``svchost.exe`` multiplexes many unrelated services behind one PID, and Task Scheduler — which
+    owns a Scheduled-Task gateway through its *task*, not through its service — is one of them. Its
+    process therefore sits in a task-launched gateway's ancestry without supervising it, so the
+    ancestry walk below must not read it as the gateway's SCM supervisor (or the updater tries
+    ``sc stop Schedule`` and aborts with Access denied). A real service supervisor is a standalone
+    image (e.g. the venv python running a HermesGateway service), which this never matches.
+    Unknown/unreadable images fail open and keep the existing SCM-supervisor semantics.
+    """
+    try:
+        image = str(psutil_module.Process(int(pid)).name() or "")
+    except Exception:
+        return False
+    return image.lower() == _WINDOWS_SHARED_SERVICE_HOST_IMAGE
+
+
 def find_windows_gateway_services(
     *, psutil_module=None, profile_processes: list[ProfileGatewayProcess] | None = None
 ) -> list[WindowsGatewayService]:
@@ -822,6 +843,11 @@ def find_windows_gateway_services(
                 raise RuntimeError("SCM service inspection failed") from exc
             if not service_name:
                 raise RuntimeError("SCM service has an empty name")
+            if service_pid > 0 and _windows_service_host_is_shared_host(psutil_module, service_pid):
+                # A shared host is never a gateway supervisor: it hosts unrelated services (Task
+                # Scheduler's `Schedule` among them) and only appears in a task-launched gateway's
+                # ancestry because the Task Scheduler service is itself a svchost-hosted service.
+                continue
             if service_status == "stopped":
                 continue
             if service_status != "running":

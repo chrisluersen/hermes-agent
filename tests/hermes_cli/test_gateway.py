@@ -1253,6 +1253,86 @@ def test_find_windows_gateway_services_maps_verified_pid_tree(monkeypatch):
     ]
 
 
+def test_find_windows_gateway_services_skips_svchost_host_but_keeps_service_supervisor(monkeypatch):
+    """Both arms of the shared-host guard.
+
+    A Scheduled-Task gateway's ancestry reaches ``svchost.exe`` — Task Scheduler's own ``Schedule``
+    service — but a shared host supervises nothing, so reporting it as the gateway's SCM supervisor
+    made the updater run ``sc stop Schedule`` and abort with Access denied. A standalone service
+    image (the venv python running a HermesGateway service) must still be reported.
+    """
+    monkeypatch.setattr(gateway.sys, "platform", "win32")
+    profile = SimpleNamespace(profile="default", pid=300, create_time=300.0)
+
+    def _psutil(images, services, parent_pids, child_pids):
+        class FakeService:
+            def __init__(self, name, pid, status="running"):
+                self.name = name
+                self.pid = pid
+                self.status = status
+
+            def as_dict(self):
+                return {"name": self.name, "pid": self.pid, "status": self.status}
+
+        class FakeProcess:
+            def __init__(self, pid):
+                self.pid = pid
+
+            def name(self):
+                return images[self.pid]
+
+            def parents(self):
+                return [FakeProcess(pid) for pid in parent_pids] if self.pid == profile.pid else []
+
+            def children(self, recursive=False):
+                assert recursive is True
+                return [FakeProcess(pid) for pid in child_pids.get(self.pid, [])]
+
+            def create_time(self):
+                return float(self.pid)
+
+        return SimpleNamespace(
+            win_service_iter=lambda: [FakeService(name, pid) for name, pid in services],
+            Process=FakeProcess,
+        )
+
+    # Arm 1: the Task Scheduler service lives in svchost.exe in the gateway's ancestry — not a supervisor.
+    assert (
+        gateway.find_windows_gateway_services(
+            psutil_module=_psutil(
+                images={300: "python.exe", 9204: "pythonw.exe", 928: "svchost.exe"},
+                services=[("Schedule", 928)],
+                parent_pids=[9204, 928],
+                child_pids={},
+            ),
+            profile_processes=[profile],
+        )
+        == []
+    )
+
+    # Arm 2: a real single-service supervisor (standalone python.exe image) is still reported.
+    assert gateway.find_windows_gateway_services(
+        psutil_module=_psutil(
+            images={300: "python.exe", 200: "pythonw.exe", 100: "python.exe"},
+            services=[("HermesGateway", 100)],
+            parent_pids=[200, 100],
+            child_pids={100: [200, 300]},
+        ),
+        profile_processes=[profile],
+    ) == [
+        gateway.WindowsGatewayService(
+            name="HermesGateway",
+            profile="default",
+            service_pid=100,
+            gateway_pid=300,
+            descendant_pids=frozenset({200, 300}),
+            descendant_identities=((200, 200.0), (300, 300.0)),
+            service_create_time=100.0,
+            gateway_create_time=300.0,
+        )
+    ]
+
+
 def test_find_windows_gateway_services_rejects_transitional_ancestor(monkeypatch):
     """A transitional service in the gateway ancestry remains fail-closed."""
     monkeypatch.setattr(gateway.sys, "platform", "win32")
