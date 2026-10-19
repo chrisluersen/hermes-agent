@@ -442,6 +442,11 @@ class _ProviderCollector:
         with context._manager._discovery_lock:
             return context._manager._register_fallback_hook(context, self._hook_source, hook_name, callback)
 
+    @property
+    def llm(self):
+        """Public host-owned inference facade, bound to this provider's identity."""
+        return self._plugin_context().llm
+
     def register_memory_provider(self, provider):
         self.provider = provider
 
