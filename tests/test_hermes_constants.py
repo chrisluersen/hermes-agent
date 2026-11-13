@@ -656,3 +656,31 @@ class TestProjectVenvDirOutOfTree:
         assert hermes_constants.project_venv_dir(other) is None
         (checkout / ".venv").mkdir()
         assert hermes_constants.project_venv_dir(checkout) == checkout / ".venv"
+
+
+class TestScratchDirUsageBytes:
+    """The size walk (``hermes doctor``'s scratch + cache-hog rows) must not follow junctions.
+
+    ``os.walk``'s ``followlinks`` does not cover them — a junction is not a symlink to
+    ``os.scandir`` — and pnpm's store plants thousands: ``store/<v>/projects/<key>/…/
+    node_modules/<pkg>`` points every entry at the live checkout, so the cache's own
+    0.69 GB was reported as 13.7 GB and doctor's remedy for that row is "delete it".
+    """
+
+    def test_junction_targets_are_not_counted(self, tmp_path, monkeypatch):
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "one.bin").write_bytes(b"a" * 100)
+        linked = tmp_path / "linked"
+        linked.mkdir()
+        (linked / "two.bin").write_bytes(b"b" * 900)
+
+        monkeypatch.setattr("pm.filesystem.is_junction", lambda _path: False)
+        everything = hermes_constants.scratch_dir_usage_bytes(tmp_path)
+        monkeypatch.setattr(
+            "pm.filesystem.is_junction",
+            lambda path: os.path.normcase(str(path)) == os.path.normcase(str(linked)),
+        )
+        # Exactly the 900 bytes behind the junction drop out; anything else in tmp_path
+        # (the repo's own io-guard marker) is counted either way and cancels.
+        assert everything - hermes_constants.scratch_dir_usage_bytes(tmp_path) == 900

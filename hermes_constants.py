@@ -1057,10 +1057,21 @@ def _prune_scratch_dir_once(scratch: Path) -> None:
 
 
 def scratch_dir_usage_bytes(scratch: Path | None = None) -> int:
-    """Total bytes under the scratch dir (for ``hermes doctor``); 0 when unreadable."""
+    """Total bytes under the scratch dir (for ``hermes doctor``); 0 when unreadable.
+
+    Junctions are pruned rather than followed: ``os.walk``'s ``followlinks`` does not cover
+    them (a junction is not a symlink to ``os.scandir``), and a package store plants
+    thousands — pnpm's ``store/<v>/projects/<key>/…/node_modules/<pkg>`` points every entry
+    at the live checkout. Summing through them reported a 0.69 GB ``cache/pnpm`` as 13.7 GB
+    and doctor's remedy for it is "delete it". Both callers are reporting paths in
+    ``hermes_cli.doctor_state``, so the walk carries the correctness rather than the callers.
+    """
+    from pm.filesystem import is_junction
+
     root = scratch if scratch is not None else get_scratch_dir(prune=False)
     total = 0
-    for dirpath, _dirnames, filenames in os.walk(root, onerror=lambda _e: None):
+    for dirpath, dirnames, filenames in os.walk(root, onerror=lambda _e: None):
+        dirnames[:] = [d for d in dirnames if not is_junction(Path(dirpath) / d)]
         for name in filenames:
             with contextlib.suppress(OSError):
                 total += os.lstat(os.path.join(dirpath, name)).st_size
