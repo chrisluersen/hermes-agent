@@ -420,27 +420,43 @@ def _prune_posture() -> tuple | None:
         return None
 
 
+# A live store churns pages continuously, so its freelist is only transiently 0: measured
+# 2026-11-13, a 3.1 GB state.db read 457 free pages of 771,105 (0.06%) minutes after the same
+# count read 0. A VACUUM worth running shows up as a real share of the file, so the test is
+# "nothing meaningful to reclaim", never "exactly nothing".
+_STATE_DB_FREELIST_NEGLIGIBLE_PERCENT = 1
+
+
+def _free_pages_are_negligible(stats: dict) -> bool:
+    """True when a VACUUM would reclaim under 1% of the file; False whenever that is unknown."""
+    free, total = stats.get("freelist_count"), stats.get("page_count")
+    if not isinstance(free, int) or not isinstance(total, int) or total <= 0:
+        return False  # an unreadable pair keeps the warning
+    return free * 100 < total * _STATE_DB_FREELIST_NEGLIGIBLE_PERCENT
+
+
 def _auto_prune_remedy_is_spent(detail: str, posture: tuple | None, stats: dict) -> bool:
     """True when an oversized-state.db warning names only a remedy that is already in place.
 
-    ``sessions.auto_prune`` on, no session old enough to prune and no free pages together mean a
-    prune and a VACUUM would both reclaim nothing, so the warning would hold ``hermes doctor`` red
-    forever while naming an action the user has already taken. An unreadable fact is deliberately
-    NOT spent: ``posture`` None, ``prunable`` -1 (store unreadable) or ``freelist`` None all keep
-    the warning, and a detail carrying a pending FTS remedy keeps it too (that remedy IS actionable).
+    ``sessions.auto_prune`` on, no session old enough to prune and no meaningful free-page slack
+    together mean a prune and a VACUUM would both reclaim nothing, so the warning would hold
+    ``hermes doctor`` red forever while naming an action the user has already taken. An unreadable
+    fact is deliberately NOT spent: ``posture`` None, ``prunable`` -1 (store unreadable) or an
+    unreadable page pair all keep the warning, and a detail carrying a pending FTS remedy keeps it
+    too (that remedy IS actionable).
     """
     if not posture or "optimize-storage" in detail:
         return False
     auto_prune, _retention, prunable = posture
-    return bool(auto_prune) and prunable == 0 and stats.get("freelist_count") == 0
+    return bool(auto_prune) and prunable == 0 and _free_pages_are_negligible(stats)
 
 
 def _bounded_detail(posture: tuple) -> str:
     """Replacement detail for a size warning whose named remedies are all already satisfied."""
     retention = posture[1] if len(posture) > 1 else 0
     return (f"(sessions.auto_prune is already on with retention {retention}d, nothing is old enough "
-            f"to prune and the file has no free pages, so neither a prune nor a VACUUM would reclaim "
-            f"anything; lower sessions.retention_days to hold less history)")
+            f"to prune and the free pages are a negligible share of the file, so neither a prune nor "
+            f"a VACUUM would reclaim anything; lower sessions.retention_days to hold less history)")
 
 
 def _state_db_stats(issues: list, state_db_path: Path) -> None:

@@ -69,8 +69,9 @@ def test_spent_remedy_downgrades_the_size_warning(doctor):
 @pytest.mark.parametrize("stats,posture,why", [
     (_stats(), (False, 90, 0), "auto_prune is not enabled, so the named remedy still applies"),
     (_stats(), (True, 90, 3), "a prune would actually delete sessions"),
-    (_stats(freelist_count=5_000), (True, 90, 0), "a VACUUM would actually reclaim pages"),
+    (_stats(freelist_count=50_000), (True, 90, 0), "a VACUUM would reclaim over 1% of the file"),
     (_stats(freelist_count=None), (True, 90, 0), "the free-page count is unreadable"),
+    (_stats(page_count=None), (True, 90, 0), "the page count is unreadable, so the share is unknown"),
     (_stats(), (True, 90, -1), "the store is unreadable, so prunable is unknown"),
     (_stats(), None, "the config is unreadable"),
     (_stats(fts_rebuild_pending=True), (True, 90, 0), "a pending FTS remedy IS actionable"),
@@ -79,6 +80,14 @@ def test_an_actionable_or_unknown_fact_keeps_the_warning(doctor, stats, posture,
     issues = doctor["run"](stats, posture)
     assert doctor["warn"], why
     assert issues and "auto_prune" in issues[0], why
+
+
+def test_a_negligible_live_freelist_is_still_spent(doctor):
+    """A live store's freelist is never exactly 0 for long — measured 457 of 771,105 pages (0.06%)
+    minutes after the same count read 0, which a VACUUM would not be worth running for."""
+    issues = doctor["run"](_stats(page_count=771_105, freelist_count=457), (True, 90, 0))
+    assert issues == []
+    assert doctor["warn"] == []
 
 
 def test_a_small_store_never_reads_the_prune_posture(doctor):
