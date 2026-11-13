@@ -407,16 +407,58 @@ def _state_db_health(f: Finding, should_fix: bool, state_db_path: Path, _DHH: st
         _repair_state_db(f, should_fix, state_db_path, "fts")
 
 
+def _prune_posture() -> tuple | None:
+    """``(auto_prune, retention_days, prunable_sessions)`` for this home, or None when unreadable.
+
+    Read through ``prune_advisor`` so doctor and maintenance share one config reader and one prune
+    predicate. Any failure reads as unknown, which keeps the warning rather than silencing it.
+    """
+    try:
+        from hermes_cli.prune_advisor import prune_posture
+        return prune_posture()
+    except Exception:  # health: allow BLE001 -- unknown must never silence a warning
+        return None
+
+
+def _auto_prune_remedy_is_spent(detail: str, posture: tuple | None, stats: dict) -> bool:
+    """True when an oversized-state.db warning names only a remedy that is already in place.
+
+    ``sessions.auto_prune`` on, no session old enough to prune and no free pages together mean a
+    prune and a VACUUM would both reclaim nothing, so the warning would hold ``hermes doctor`` red
+    forever while naming an action the user has already taken. An unreadable fact is deliberately
+    NOT spent: ``posture`` None, ``prunable`` -1 (store unreadable) or ``freelist`` None all keep
+    the warning, and a detail carrying a pending FTS remedy keeps it too (that remedy IS actionable).
+    """
+    if not posture or "optimize-storage" in detail:
+        return False
+    auto_prune, _retention, prunable = posture
+    return bool(auto_prune) and prunable == 0 and stats.get("freelist_count") == 0
+
+
+def _bounded_detail(posture: tuple) -> str:
+    """Replacement detail for a size warning whose named remedies are all already satisfied."""
+    retention = posture[1] if len(posture) > 1 else 0
+    return (f"(sessions.auto_prune is already on with retention {retention}d, nothing is old enough "
+            f"to prune and the file has no free pages, so neither a prune nor a VACUUM would reclaim "
+            f"anything; lower sessions.retention_days to hold less history)")
+
+
 def _state_db_stats(issues: list, state_db_path: Path) -> None:
     """Health/stats snapshot: strictly read-only (mode=ro) so it is safe against a live DB held by
     the gateway; any failure degrades to one info line rather than failing doctor."""
     with warn_on_error("state.db stats unavailable ({e})", "", report=lambda t, _d: check_info(t)):
         from hermes_state_dbfile import collect_state_db_stats, count_db_holders
-        rows = _render_state_db_stats(collect_state_db_stats(state_db_path), holders=count_db_holders(state_db_path),
+        stats = collect_state_db_stats(state_db_path)
+        rows = _render_state_db_stats(stats, holders=count_db_holders(state_db_path),
                                       host_note=host_gateway_note())
+        # Only an oversized-DB row needs the prune posture, and reading it opens the store.
+        posture = _prune_posture() if any("auto_prune" in d for _k, _t, d in rows) else None
         for _kind, _text, _detail in rows:
             if _kind != "warn":
                 check_info(_text + (f" {_detail}" if _detail else ""))
+                continue
+            if _auto_prune_remedy_is_spent(_detail, posture, stats):
+                check_info(f"{_text} {_bounded_detail(posture)}")
                 continue
             check_warn(_text, _detail)
             if "auto_prune" in _detail:

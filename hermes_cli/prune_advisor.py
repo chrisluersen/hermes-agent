@@ -118,6 +118,35 @@ def _retention_days(sessions: dict) -> int:
     return days if days >= 0 else 90
 
 
+def prune_posture(home: Optional[Path] = None) -> Optional[tuple[bool, int, int]]:
+    """``(auto_prune_enabled, retention_days, prunable_sessions)`` as maintenance sees them.
+
+    The public reader for callers that must decide whether a prune would reclaim anything —
+    ``hermes doctor`` warns about an oversized ``state.db`` and names auto_prune as the remedy, so
+    it has to know the remedy is already in place and what is left to reclaim. ``prunable`` counts
+    through the same ``_prune_where`` predicate the prune command deletes through, and is ``-1``
+    when the store could not be read: a busy or damaged store must never read as "nothing to
+    prune". ``None`` means the config itself was unreadable. Read-only, so it is safe against a
+    live database.
+    """
+    sessions = _effective_sessions(home)
+    if sessions is None:
+        return None
+    retention = _retention_days(sessions)
+    prunable = -1
+    try:
+        from hermes_state import SessionDB
+        db = SessionDB(db_path=_home(home) / "state.db", read_only=True)
+        try:
+            where, params = db._prune_where(retention, None, {}, whole_lineages=True)
+            prunable = int((db._read_one(f"SELECT COUNT(*) FROM sessions s WHERE {where}", params) or (0,))[0])
+        finally:
+            db.close()
+    except (sqlite3.Error, OSError, RuntimeError, ValueError) as exc:
+        logger.debug("prune posture: candidate count unavailable: %s", exc)
+    return bool(sessions.get("auto_prune")), retention, prunable
+
+
 def undecided(home: Optional[Path] = None) -> bool:
     """True while neither the user's config nor an administrator's managed layer sets
     ``sessions.auto_prune``. A managed value is already decided: asking would promise a choice the
