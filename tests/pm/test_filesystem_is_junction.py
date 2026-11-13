@@ -31,5 +31,9 @@ def test_real_junction_and_plain_directory(tmp_path: Path) -> None:
     try:
         assert is_junction(junction) is True
         assert is_junction(target) is False
+        # A raw str has no .lstat(): it must still answer True, not fail open as "not a junction".
+        assert is_junction(str(junction)) is True
+        assert is_junction(str(target)) is False
+        assert is_junction(str(tmp_path / "absent")) is False
     finally:
         junction.rmdir()
