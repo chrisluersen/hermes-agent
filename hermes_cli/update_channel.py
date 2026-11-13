@@ -351,8 +351,10 @@ def stale_channel_records(config: Optional[dict]) -> list[tuple[str, dict, str]]
       to a DIFFERENT sha16 (the tree moved / was recreated elsewhere and a
       new record claimed it; this one is a leftover).
     * ``"missing"``  — nothing at the recorded path: offer GC (keep-on-doubt).
-    * ``"unclaimed"`` — the sha16 matches no live install record
-      (``installs/<sha16>/install.json``): offer GC.
+    * ``"unclaimed"`` — the sha16 matches no live install record under
+      ``installs/<sha16>/`` — ``facts.json`` for a source checkout
+      (:func:`pm.environments.runtime_facts_path`), ``install.json`` for a
+      packaged one: offer GC.
     """
     stale: list[tuple[str, dict, str]] = []
     for sha16, record in _install_records(config).items():
@@ -373,10 +375,16 @@ def stale_channel_records(config: Optional[dict]) -> list[tuple[str, dict, str]]
                 continue
 
         # Cross-check against the live install-state records: a channel
-        # record whose sha16 has no installs/<sha16>/install.json was
-        # either hand-written or its install never booted post-record.
+        # record whose sha16 has no installs/<sha16>/ state was either
+        # hand-written or its install never booted post-record. Source
+        # installs publish facts.json (pm.environments.runtime_facts_path —
+        # the marker pm.environments.owning_home_root reads); install.json is
+        # the packaged/desktop one. Probing install.json alone flagged every
+        # git checkout as stale, and this check's remedy is "remove the key",
+        # so doctor told source users to drop a channel pin that was live.
         try:
-            if not (installs_root() / sha16 / "install.json").is_file():
+            state = installs_root() / sha16
+            if not (state / "facts.json").is_file() and not (state / "install.json").is_file():
                 stale.append((sha16, record, "unclaimed"))
         except Exception as exc:
             logger.debug("installs root unavailable: %s", exc)

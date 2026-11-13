@@ -373,7 +373,8 @@ class TestSetChannelCLI:
 
 
 @pytest.mark.parametrize('kind,expected', [('missing', 'missing'), ('replaced', 'replaced'),
-                                             ('unclaimed', 'unclaimed'), ('healthy', None)])
+                                             ('unclaimed', 'unclaimed'), ('healthy-source', None),
+                                             ('healthy-packaged', None)])
 def test_doctor_channel_records_are_read_only(tmp_path, monkeypatch, kind, expected):
     from copy import deepcopy
     home, root = tmp_path / '.hermes', tmp_path / 'install'
@@ -382,10 +383,15 @@ def test_doctor_channel_records_are_read_only(tmp_path, monkeypatch, kind, expec
         root.mkdir()
     key = '0' * 16 if kind == 'replaced' else install_id(root)
     config = {'update': {'installs': {key: {'path': str(root), 'channel': 'main'}}}}
-    if kind == 'healthy':
+    # A live install publishes installs/<key>/facts.json when it is a source
+    # checkout (pm.environments.runtime_facts_path) and install.json when it is
+    # a packaged one; either one clears the sha16. Source installs never write
+    # install.json, so keying on it alone declared every git checkout stale.
+    marker = {'healthy-source': 'facts.json', 'healthy-packaged': 'install.json'}.get(kind)
+    if marker:
         state = home / 'installs' / key
         state.mkdir(parents=True)
-        (state / 'install.json').write_text(json.dumps({'root': str(root)}), encoding='utf-8')
+        (state / marker).write_text(json.dumps({'root': str(root)}), encoding='utf-8')
     before = deepcopy(config)
     assert [(key, reason) for key, _, reason in stale_channel_records(config)] == (
         [(key, expected)] if expected else [])
